@@ -1,0 +1,24 @@
+{
+  "summary": {
+    "auditDateIst": "2026-05-16",
+    "auditWindowUtc": {
+      "start": "2026-05-15T18:30:00.000Z",
+      "end": "2026-05-16T18:29:59.999Z"
+    },
+    "emailFilter": "camrdco@gmail.com",
+    "folderLikeCollections": [],
+    "totalClientsInBatch": 0,
+    "completeEvidence": 0,
+    "needsReview": 0,
+    "missingClientProfile": 0,
+    "missingClientPackage": 0,
+    "missingSubscription": 0,
+    "missingScheduleItems": 0,
+    "missingTasks": 0,
+    "setupRecordsCreatedAfterAuditDay": 0,
+    "gstEvidenceClients": 0,
+    "tdsEvidenceClients": 0,
+    "itrEvidenceClients": 0
+  },
+  "rows": []
+}

@@ -1,0 +1,19 @@
+{
+  "company": "Kriyona Studio",
+  "month": 1,
+  "year": 2026,
+  "dashboard": {
+    "totalSales": 238437,
+    "outstanding": 3000,
+    "recovery": 235437
+  },
+  "actuals": {
+    "collection": 141287,
+    "expense": 3689,
+    "loss": 0
+  },
+  "alerts": {
+    "difference": 94150,
+    "mismatchReason": "Recovery shows collection ON JAN SALES (even if paid in Feb). Collection shows MONEY IN IN JAN (even if from Dec sales)."
+  }
+}
