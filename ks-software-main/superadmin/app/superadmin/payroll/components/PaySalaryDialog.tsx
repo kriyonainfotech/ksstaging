@@ -5,8 +5,7 @@ import {
     Dialog, 
     DialogContent, 
     DialogHeader, 
-    DialogTitle, 
-    DialogFooter 
+    DialogTitle
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,28 +21,46 @@ import { useAppDispatch, useAppSelector } from "@/src/redux/hooks";
 import { RootState } from "@/src/redux/store";
 import { recordSalaryPayment } from "@/src/redux/slices/salarySlice";
 import { toast } from "sonner";
-import { useEffect, useMemo } from "react";
-import { Loader2, Coins, Building2, UserCircle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Coins, Building2, UserCircle } from "lucide-react";
+import { paymentService } from "@/src/services/paymentService";
+import type { PayrollMember } from "./TeamList";
+
+const ownerMap: Record<string, string> = {
+    "nayanbhisara@kriyonastudio.com": "Kriyona Studio",
+    "prarthanavaghani@kriyonastudio.com": "PrimeAdwork",
+    "kirtannarola@kriyonastudio.com": "Kriyona Infotech",
+};
+
+const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+];
+
+interface SalaryPaymentForm {
+    amount: number;
+    paymentSource: string;
+    company: string;
+    notes: string;
+    salaryMonth: number;
+    salaryYear: number;
+}
 
 interface PaySalaryDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    user: any;
+    user: PayrollMember | null;
     month: number;
     year: number;
+    activeTab?: string;
 }
 
-export function PaySalaryDialog({ open, onOpenChange, user, month, year }: PaySalaryDialogProps) {
+export function PaySalaryDialog({ open, onOpenChange, user, month, year, activeTab }: PaySalaryDialogProps) {
     const dispatch = useAppDispatch();
     const currentUser = useAppSelector((state: RootState) => state.auth.user);
-    
-    // Ownership Mapping (Synchronized with RecordExpenseDialog)
-    const ownerMap: Record<string, string> = {
-        "nayanbhisara@kriyonastudio.com": "Kriyona Studio",
-        "prarthanavaghani@kriyonastudio.com": "PrimeAdwork",
-        "kirtannarola@kriyonastudio.com": "Kriyona Infotech",
-    };
 
+    const [balances, setBalances] = useState<{ company: number; personal: number; cash: number } | null>(null);
+    const [isFetchingBalances, setIsFetchingBalances] = useState(false);
     const userCompany = useMemo(() => {
         return ownerMap[currentUser?.email || ""] || null;
     }, [currentUser]);
@@ -52,7 +69,7 @@ export function PaySalaryDialog({ open, onOpenChange, user, month, year }: PaySa
         return currentUser?.role === "Superadmin";
     }, [currentUser]);
 
-    const { register, handleSubmit, setValue, watch, reset } = useForm({
+    const { register, handleSubmit, setValue, watch, reset } = useForm<SalaryPaymentForm>({
         defaultValues: {
             amount: 0,
             paymentSource: "Company Bank",
@@ -62,11 +79,6 @@ export function PaySalaryDialog({ open, onOpenChange, user, month, year }: PaySa
             salaryYear: year
         }
     });
-
-    const monthNames = [
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
-    ];
 
     useEffect(() => {
         if (user) {
@@ -91,31 +103,79 @@ export function PaySalaryDialog({ open, onOpenChange, user, month, year }: PaySa
         }
     }, [user, month, year, setValue, isGlobalAdmin, userCompany, currentUser]);
 
-    const onSubmit = async (data: any) => {
+    const onSubmit = async (data: SalaryPaymentForm) => {
+        if (!user) return;
+
         try {
+            // Check balance limit
+            const currentBalance = getSelectedBalance();
+            const payAmount = Number(data.amount) || 0;
+            if (payAmount > currentBalance) {
+                toast.error(`Insufficient funds in ${data.paymentSource}. Available balance is ₹${currentBalance.toLocaleString()}. Negative values not allowed.`);
+                return;
+            }
+
             const payload = {
                 ...data,
                 userId: user._id,
                 userName: user.name,
                 date: new Date(data.salaryYear, data.salaryMonth - 1, new Date().getDate()),
                 salaryMonth: data.salaryMonth,
-                salaryYear: data.salaryYear
+                salaryYear: data.salaryYear,
+                payrollLineId: user.payrollLineId,
+                tab: activeTab
             };
             
             await dispatch(recordSalaryPayment(payload)).unwrap();
             toast.success(`Salary payment of ₹${data.amount} recorded for ${user.name}`);
             onOpenChange(false);
             reset();
-        } catch (error: any) {
-            toast.error(error || "Failed to record payment");
+        } catch (error: unknown) {
+            toast.error(typeof error === "string" ? error : "Failed to record payment");
         }
     };
 
-    if (!user) return null;
-
     const companyValue = watch("company");
+    const paymentSourceValue = watch("paymentSource");
+    const amountValue = watch("amount");
     const selectedSalaryMonth = watch("salaryMonth");
     const selectedSalaryYear = watch("salaryYear");
+
+    const getSelectedBalance = () => {
+        if (!balances) return 0;
+        if (paymentSourceValue === "Company Bank") return balances.company;
+        if (paymentSourceValue === "Personal Bank") return balances.personal;
+        if (paymentSourceValue === "Cash") return balances.cash;
+        return 0;
+    };
+
+    const pendingSalary = user ? Math.max((user.earnedBalance || 0) - (user.paidAmount || 0), 0) : 0;
+    const hasInsufficientBalance = Number(amountValue || 0) > getSelectedBalance();
+
+    useEffect(() => {
+        if (open && companyValue) {
+            setIsFetchingBalances(true);
+            paymentService.getStats(companyValue)
+                .then((stats) => {
+                    if (stats && stats.byAccount) {
+                        setBalances({
+                            company: stats.byAccount.company || 0,
+                            personal: stats.byAccount.personal || 0,
+                            cash: stats.byAccount.cash || 0
+                        });
+                    }
+                })
+                .catch((err) => {
+                    console.error("Failed to fetch company balances:", err);
+                    setBalances(null);
+                })
+                .finally(() => {
+                    setIsFetchingBalances(false);
+                });
+        }
+    }, [open, companyValue]);
+
+    if (!user) return null;
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -146,19 +206,43 @@ export function PaySalaryDialog({ open, onOpenChange, user, month, year }: PaySa
                                 <Input 
                                     type="number" 
                                     {...register("amount", { required: true, min: 1 })}
-                                    className="pl-7 h-10 rounded-md border-input focus:ring-primary focus:border-primary font-bold text-base"
+                                    className={`pl-7 h-10 rounded-md font-bold text-base ${hasInsufficientBalance ? "border-red-500 focus:ring-red-500 focus:border-red-500" : "border-input focus:ring-primary focus:border-primary"}`}
                                 />
                             </div>
+                            {hasInsufficientBalance ? (
+                                <p className="text-[10px] font-bold text-red-500 mt-1">
+                                    Insufficient balance in selected account.
+                                </p>
+                            ) : (
+                                <p className="text-[10px] font-semibold text-muted-foreground mt-1">
+                                    Calculated balance: ₹{pendingSalary.toLocaleString()}. Paid amount can be different.
+                                </p>
+                            )}
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">
-                                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider ml-0.5">Source Account</Label>
+                                <div className="flex items-center justify-between w-full ml-0.5 pr-0.5">
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Source Account</Label>
+                                    <div className="text-[10px] font-bold">
+                                        {isFetchingBalances ? (
+                                            <span className="text-muted-foreground animate-pulse">Loading...</span>
+                                        ) : balances ? (
+                                            <span className="text-muted-foreground font-semibold">
+                                                Bal: <span className={getSelectedBalance() <= 0 ? "text-red-500 font-extrabold" : "text-emerald-600 font-extrabold"}>
+                                                    ₹{getSelectedBalance().toLocaleString()}
+                                                </span>
+                                            </span>
+                                        ) : (
+                                            <span className="text-red-500 font-bold">Unavailable</span>
+                                        )}
+                                    </div>
+                                </div>
                                 <Select 
                                     defaultValue="Company Bank" 
                                     onValueChange={(val) => setValue("paymentSource", val)}
                                 >
-                                    <SelectTrigger className="h-10 rounded-md border-input font-medium text-sm">
+                                    <SelectTrigger className="w-full h-10 rounded-md border-input font-medium text-sm">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -176,7 +260,7 @@ export function PaySalaryDialog({ open, onOpenChange, user, month, year }: PaySa
                                     onValueChange={(val) => !(!isGlobalAdmin) && setValue("company", val)}
                                     disabled={!isGlobalAdmin}
                                 >
-                                    <SelectTrigger className={`h-10 rounded-md border-input font-medium text-sm ${!isGlobalAdmin ? 'bg-muted opacity-80 cursor-not-allowed' : ''}`}>
+                                    <SelectTrigger className={`w-full h-10 rounded-md border-input font-medium text-sm ${!isGlobalAdmin ? 'bg-muted opacity-80 cursor-not-allowed' : ''}`}>
                                         <div className="flex items-center gap-2">
                                             <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
                                             <SelectValue placeholder="Select Company" />
@@ -207,7 +291,7 @@ export function PaySalaryDialog({ open, onOpenChange, user, month, year }: PaySa
                                         setValue("notes", `Salary for ${monthNames[parseInt(val) - 1]} ${selectedSalaryYear}`);
                                     }}
                                 >
-                                    <SelectTrigger className="h-10 rounded-md border-input font-medium text-sm">
+                                    <SelectTrigger className="w-full h-10 rounded-md border-input font-medium text-sm">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -227,7 +311,7 @@ export function PaySalaryDialog({ open, onOpenChange, user, month, year }: PaySa
                                         setValue("notes", `Salary for ${monthNames[selectedSalaryMonth - 1]} ${val}`);
                                     }}
                                 >
-                                    <SelectTrigger className="h-10 rounded-md border-input font-medium text-sm">
+                                    <SelectTrigger className="w-full h-10 rounded-md border-input font-medium text-sm">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -249,22 +333,23 @@ export function PaySalaryDialog({ open, onOpenChange, user, month, year }: PaySa
                         </div>
                     </div>
 
-                    <DialogFooter className="pt-2">
+                    <div className="pt-4 flex items-center justify-between gap-3 w-full">
                         <Button 
                             type="button" 
-                            variant="ghost" 
+                            variant="outline" 
                             onClick={() => onOpenChange(false)}
-                            className="rounded-md font-semibold text-muted-foreground"
+                            className="w-1/2 rounded-md font-semibold text-muted-foreground h-10"
                         >
                             Cancel
                         </Button>
                         <Button 
                             type="submit" 
-                            className="bg-primary hover:bg-primary/90 rounded-md px-6 font-bold uppercase tracking-wider text-[10px] h-10"
+                            disabled={!balances || isFetchingBalances || Number(amountValue || 0) <= 0 || hasInsufficientBalance}
+                            className="w-1/2 bg-primary hover:bg-primary/90 rounded-md px-6 font-bold uppercase tracking-wider text-[10px] h-10 disabled:opacity-50 disabled:pointer-events-none"
                         >
                             Confirm Payment
                         </Button>
-                    </DialogFooter>
+                    </div>
                 </form>
             </DialogContent>
         </Dialog>

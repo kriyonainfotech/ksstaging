@@ -15,6 +15,10 @@ const scheduleSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "ServiceItem", // Changed to ServiceItem to match subscriptions
     },
+    assignedTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
     date: {
       type: Date,
       // Optional for unscheduled quota items

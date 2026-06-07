@@ -4,12 +4,10 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useAppDispatch, useAppSelector } from "@/src/redux/hooks";
 import { fetchClients } from "@/src/redux/slices/clientSlice";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Package, Plus, Loader2, ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Search, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import { AssignmentWizard } from "@/components/subscriptions/AssignmentWizard";
 import { ChutakDialog } from "./components/ChutakDialog";
 import { DataHandler } from "@/components/DataHandler";
@@ -19,47 +17,60 @@ import { CreateChutakSaleDialog } from "./components/CreateChutakSaleDialog";
 import { ClientExpandableDetails } from "./components/ClientExpandableDetails";
 import { BillingDownloadDialog } from "./components/BillingDownloadDialog";
 import { cn } from "@/lib/utils";
+import { Client } from "@/lib/clientdata";
+import { Subscription } from "@/lib/subscriptionData";
+
+type ClientDisplaySubscription = {
+    packageName?: string;
+    status?: "Active" | "Completed" | "Cancelled";
+};
+
+type AssignClient = Omit<Client, "subscriptions"> & {
+    subscriptions?: ClientDisplaySubscription[];
+};
+
+type ChutakSaleItem = {
+    price?: number;
+    [key: string]: unknown;
+};
 
 export default function AssignPackagesPage() {
     const dispatch = useAppDispatch();
     const { clients, isLoading } = useAppSelector((state) => state.clients);
 
-    // Filters for Tabs
     const [filter, setFilter] = useState("");
     const [activeTab, setActiveTab] = useState("fixed");
 
-    // Modals state
     const [assignWizardOpen, setAssignWizardOpen] = useState(false);
     const [chutakOpen, setChutakOpen] = useState(false);
     const [viewChutakOpen, setViewChutakOpen] = useState(false);
     const [createSaleOpen, setCreateSaleOpen] = useState(false);
     const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
     const [selectedClient, setSelectedClient] = useState<{ id: string; businessName: string } | null>(null);
-    const [editingSubscription, setEditingSubscription] = useState<any | null>(null);
+    const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
     const [billingDownloadOpen, setBillingDownloadOpen] = useState(false);
-    const [chutakItemsForSale, setChutakItemsForSale] = useState<any[]>([]);
+    const [chutakItemsForSale, setChutakItemsForSale] = useState<ChutakSaleItem[]>([]);
     const [saleDateRange, setSaleDateRange] = useState<{ from: Date; to: Date } | null>(null);
 
     useEffect(() => {
         dispatch(fetchClients());
     }, [dispatch]);
 
-    // 1. FIXED TAB CLIENTS: Show all clients (filtered by search)
     const fixedClients = useMemo(() => {
-        return clients.filter(c => {
-            const matchesSearch = c.businessName?.toLowerCase().includes(filter.toLowerCase()) ||
-                c.name?.toLowerCase().includes(filter.toLowerCase());
-            return matchesSearch;
+        return clients.filter((client) => {
+            const search = filter.toLowerCase();
+            return client.businessName?.toLowerCase().includes(search) ||
+                client.name?.toLowerCase().includes(search);
         });
     }, [clients, filter]);
 
-    // 2. CHUTAK TAB CLIENTS: Show only clients who have chutak items (filtered by search)
     const chutakClients = useMemo(() => {
-        return clients.filter(c => {
-            if (!c.hasChutakItems) return false;
-            const matchesSearch = c.businessName?.toLowerCase().includes(filter.toLowerCase()) ||
-                c.name?.toLowerCase().includes(filter.toLowerCase());
-            return matchesSearch;
+        return clients.filter((client) => {
+            if (!client.hasChutakItems) return false;
+
+            const search = filter.toLowerCase();
+            return client.businessName?.toLowerCase().includes(search) ||
+                client.name?.toLowerCase().includes(search);
         });
     }, [clients, filter]);
 
@@ -67,40 +78,95 @@ export default function AssignPackagesPage() {
         setExpandedClientId(expandedClientId === clientId ? null : clientId);
     };
 
-    const handleAssignFixed = (client?: any, subscription?: any) => {
+    const handleAssignFixed = (client?: AssignClient, subscription?: Subscription) => {
         setSelectedClient(client ? { id: client.id, businessName: client.businessName } : null);
         setEditingSubscription(subscription || null);
         setAssignWizardOpen(true);
     };
 
-    const handleDownloadBilling = (client: any) => {
+    const handleDownloadBilling = (client: AssignClient) => {
         setSelectedClient({ id: client.id, businessName: client.businessName });
         setBillingDownloadOpen(true);
     };
 
-    const handleAddChutak = (client?: any) => {
+    const handleAddChutak = (client?: AssignClient) => {
         setSelectedClient(client ? { id: client.id, businessName: client.businessName } : null);
         setChutakOpen(true);
     };
 
-    const handleViewChutak = (client: any) => {
+    const handleViewChutak = (client: AssignClient) => {
         setSelectedClient({ id: client.id, businessName: client.businessName });
         setViewChutakOpen(true);
     };
 
-    const handleTriggerSaleFlow = (items: any[], range: { from: Date; to: Date }) => {
+    const handleTriggerSaleFlow = (items: ChutakSaleItem[], range: { from: Date; to: Date }) => {
         setChutakItemsForSale(items);
         setSaleDateRange(range);
         setCreateSaleOpen(true);
     };
 
+    const renderStatusBadge = (status?: string) => (
+        <Badge
+            className={cn(
+                "capitalize h-6 px-2.5 text-xs font-medium",
+                status === "Active"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-amber-50 text-amber-700 border-amber-200"
+            )}
+            variant="outline"
+        >
+            {status || "Onboarding"}
+        </Badge>
+    );
+
+    const renderClientCell = (client: AssignClient, isExpanded: boolean) => (
+        <div className="flex items-center gap-3">
+            <div
+                className={cn(
+                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors",
+                    isExpanded
+                        ? "bg-primary/10 text-primary border-primary/20"
+                        : "bg-muted/40 text-muted-foreground border-transparent"
+                )}
+            >
+                {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </div>
+            <div>
+                <div className="font-semibold text-foreground leading-none">{client.businessName}</div>
+                <div className="text-xs text-muted-foreground mt-1">{client.name}</div>
+            </div>
+        </div>
+    );
+
+    const renderExpandedDetails = (client: AssignClient, colSpan: number) => (
+        <TableRow className="hover:bg-transparent border-t-0">
+            <TableCell colSpan={colSpan} className="p-0 border-t-0 bg-muted/10">
+                <ClientExpandableDetails
+                    client={{ id: client.id, businessName: client.businessName }}
+                    activeTab={activeTab}
+                    onAssignFixed={(sub) => handleAssignFixed(client, sub)}
+                    onAddChutak={() => handleAddChutak(client)}
+                    onViewAllChutak={() => handleViewChutak(client)}
+                    onDownloadBilling={() => handleDownloadBilling(client)}
+                />
+            </TableCell>
+        </TableRow>
+    );
+
     return (
         <div className="flex flex-col gap-6">
-            <Tabs defaultValue="fixed" className="w-full" onValueChange={setActiveTab}>
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
-                    <TabsList className="grid w-full md:w-[400px] grid-cols-2">
-                        <TabsTrigger value="fixed">Fixed Packages</TabsTrigger>
-                        <TabsTrigger value="chutak">Chutak Clients</TabsTrigger>
+            <Tabs
+                value={activeTab}
+                className="w-full"
+                onValueChange={(value) => {
+                    setActiveTab(value);
+                    setExpandedClientId(null);
+                }}
+            >
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <TabsList className="grid w-full md:w-auto grid-cols-2">
+                        <TabsTrigger value="fixed" className="gap-2 px-4">Fixed Packages</TabsTrigger>
+                        <TabsTrigger value="chutak" className="gap-2 px-4">Chutak Clients</TabsTrigger>
                     </TabsList>
 
                     <div className="relative w-full md:max-w-sm">
@@ -108,226 +174,169 @@ export default function AssignPackagesPage() {
                         <Input
                             placeholder="Search active clients..."
                             value={filter}
-                            onChange={(e) => setFilter(e.target.value)}
-                            className="pl-9 bg-card"
+                            onChange={(event) => setFilter(event.target.value)}
+                            className="pl-9 bg-card h-10"
                         />
                     </div>
                 </div>
 
-                <TabsContent value="fixed">
-                    <Card className="shadow-sm border-slate-100 pb-0">
-                        {/* Modified Card Header with Assign Package Button */}
-                        <CardHeader className="flex flex-row items-center justify-between pb-6">
+                <TabsContent value="fixed" className="mt-4">
+                    <div className="rounded-md border bg-card shadow-sm overflow-hidden">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-4 border-b">
                             <div className="space-y-1">
-                                <CardTitle className="text-xl font-black text-slate-800">Fixed Client Management</CardTitle>
-                                <CardDescription className="text-sm">View and manage already assigned recurring monthly packages.</CardDescription>
+                                <h2 className="text-lg font-semibold text-foreground">Fixed Client Management</h2>
+                                <p className="text-sm text-muted-foreground">View and manage already assigned recurring monthly packages.</p>
                             </div>
                             <Button
                                 onClick={() => handleAssignFixed()}
-                                className="bg-red-600 hover:bg-red-700 text-white font-bold h-10 px-6 gap-2 shadow-sm"
+                                className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground gap-2"
                             >
-                                <Plus size={18} /> Assign New Package
+                                <Plus size={16} /> Assign New Package
                             </Button>
-                        </CardHeader>
-                        <CardContent className="p-0 border-t border-slate-100">
-                            <div className="overflow-hidden bg-card">
-                                <Table>
-                                    <TableHeader className="bg-slate-50/50">
-                                        <TableRow className="hover:bg-transparent border-b border-slate-100">
-                                            <TableHead className="py-4 px-6 text-xs font-black uppercase text-slate-500 tracking-wider">Client Business</TableHead>
-                                            <TableHead className="py-4 text-xs font-black uppercase text-slate-500 tracking-wider">Active Package</TableHead>
-                                            <TableHead className="py-4 text-xs font-black uppercase text-slate-500 tracking-wider">Status</TableHead>
-                                            <TableHead className="py-4 px-6 text-right text-xs font-black uppercase text-slate-500 tracking-wider">Action</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        <DataHandler
-                                            loading={isLoading && clients.length === 0}
-                                            isEmpty={!isLoading && fixedClients.length === 0}
-                                            variant="table-row"
-                                            colSpan={4}
-                                            emptyText="No fixed packages assigned yet."
-                                        >
-                                            {fixedClients.map((client) => {
-                                                const isExpanded = expandedClientId === client.id;
-                                                return (
-                                                    <React.Fragment key={client.id}>
-                                                        <TableRow
-                                                            className={cn(
-                                                                "cursor-pointer transition-all duration-200 border-b border-slate-50",
-                                                                isExpanded ? "bg-slate-50/50" : "hover:bg-slate-50/30"
-                                                            )}
-                                                            onClick={() => toggleExpand(client.id)}
-                                                        >
-                                                            <TableCell className="py-5 px-6">
-                                                                <div className="flex items-center gap-4">
-                                                                    <div className={cn(
-                                                                        "p-2 rounded-lg transition-all",
-                                                                        isExpanded ? "bg-red-600 text-white shadow-md shadow-red-200" : "bg-slate-100 text-slate-400"
-                                                                    )}>
-                                                                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                                                                    </div>
-                                                                    <div>
-                                                                        <div className="font-bold text-slate-800 text-md">{client.businessName}</div>
-                                                                        <div className="text-xs text-muted-foreground  mt-0.5">{client.name}</div>
-                                                                    </div>
-                                                                </div>
-                                                            </TableCell>
-                                                            <TableCell className="py-5">
-                                                                {(() => {
-                                                                    const displaySub = (client.subscriptions || []).find((s: any) => s.status === "Active") ||
-                                                                        (client.subscriptions || []).find((s: any) => s.status === "Completed");
-                                                                    if (!displaySub) return null;
-                                                                    return (
-                                                                        <Badge
-                                                                            variant="secondary"
-                                                                            className={cn(
-                                                                                "font-bold h-6 px-3 text-[10px] uppercase border",
-                                                                                displaySub.status === "Active" ? "bg-white text-red-600 border-red-100 shadow-sm" : "bg-slate-50 text-slate-500 border-slate-200"
-                                                                            )}
-                                                                        >
-                                                                            {displaySub.packageName}
-                                                                        </Badge>
-                                                                    );
-                                                                })()}
-                                                            </TableCell>
-                                                            <TableCell className="py-5">
-                                                                <Badge
-                                                                    className={cn(
-                                                                        "capitalize text-[10px] h-6 px-3 font-black",
-                                                                        client.status === 'Active' ? 'bg-red-600 text-white border-none shadow-sm' : 'bg-red-100 text-red-800'
-                                                                    )}
-                                                                    variant="outline"
-                                                                >
-                                                                    {client.status || 'Onboarding'}
-                                                                </Badge>
-                                                            </TableCell>
-                                                            <TableCell className="py-5 px-6 text-right">
-                                                                <div className="flex justify-end pr-2">
-                                                                    <ChevronRight size={18} className={cn("transition-transform duration-300 text-slate-300", isExpanded && "rotate-90 text-red-600")} />
-                                                                </div>
-                                                            </TableCell>
-                                                        </TableRow>
-                                                        {isExpanded && (
-                                                            <TableRow className="hover:bg-transparent border-t-0">
-                                                                <TableCell colSpan={4} className="p-0 border-t-0 bg-white">
-                                                                    <ClientExpandableDetails
-                                                                        client={{ id: client.id, businessName: client.businessName }}
-                                                                        activeTab={activeTab}
-                                                                        onAssignFixed={(sub) => handleAssignFixed(client, sub)}
-                                                                        onAddChutak={() => handleAddChutak(client)}
-                                                                        onViewAllChutak={() => handleViewChutak(client)}
-                                                                        onDownloadBilling={() => handleDownloadBilling(client)}
-                                                                    />
-                                                                </TableCell>
-                                                            </TableRow>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            <Table>
+                                <TableHeader className="bg-muted/30">
+                                    <TableRow>
+                                        <TableHead className="w-24 pl-6 font-semibold text-muted-foreground whitespace-nowrap">Sr. No.</TableHead>
+                                        <TableHead className="font-semibold text-muted-foreground whitespace-nowrap">Client Business</TableHead>
+                                        <TableHead className="font-semibold text-muted-foreground whitespace-nowrap">Active Package</TableHead>
+                                        <TableHead className="font-semibold text-muted-foreground whitespace-nowrap">Status</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    <DataHandler
+                                        loading={isLoading && clients.length === 0}
+                                        isEmpty={!isLoading && fixedClients.length === 0}
+                                        variant="table-row"
+                                        colSpan={4}
+                                        emptyText="No fixed packages assigned yet."
+                                    >
+                                        {fixedClients.map((client, index) => {
+                                            const isExpanded = expandedClientId === client.id;
+                                            const typedClient = client as AssignClient;
+                                            const displaySub = (typedClient.subscriptions || []).find((sub) => sub.status === "Active") ||
+                                                (typedClient.subscriptions || []).find((sub) => sub.status === "Completed");
+
+                                            return (
+                                                <React.Fragment key={client.id}>
+                                                    <TableRow
+                                                        className={cn(
+                                                            "cursor-pointer transition-colors",
+                                                            isExpanded ? "bg-muted/30" : "hover:bg-muted/20"
                                                         )}
-                                                    </React.Fragment>
-                                                );
-                                            })}
-                                        </DataHandler>
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </CardContent>
-                    </Card>
+                                                        onClick={() => toggleExpand(client.id)}
+                                                    >
+                                                        <TableCell className="py-3 pl-6 text-sm text-muted-foreground whitespace-nowrap">
+                                                            {index + 1}.
+                                                        </TableCell>
+                                                        <TableCell className="py-3 min-w-[260px]">
+                                                            {renderClientCell(typedClient, isExpanded)}
+                                                        </TableCell>
+                                                        <TableCell className="py-3 whitespace-nowrap">
+                                                            {displaySub ? (
+                                                                <Badge
+                                                                    variant="secondary"
+                                                                    className={cn(
+                                                                        "h-6 px-2.5 text-xs font-medium border",
+                                                                        displaySub.status === "Active"
+                                                                            ? "bg-primary/5 text-primary border-primary/20"
+                                                                            : "bg-muted text-muted-foreground border-border"
+                                                                    )}
+                                                                >
+                                                                    {displaySub.packageName}
+                                                                </Badge>
+                                                            ) : (
+                                                                <span className="text-sm text-muted-foreground">Not assigned</span>
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell className="py-3 whitespace-nowrap">
+                                                            {renderStatusBadge(client.status)}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                    {isExpanded && renderExpandedDetails(typedClient, 4)}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </DataHandler>
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </div>
                 </TabsContent>
 
-                <TabsContent value="chutak">
-                    <Card className="shadow-sm pb-0">
-                        <CardHeader className="flex flex-row items-center justify-between pb-4">
+                <TabsContent value="chutak" className="mt-4">
+                    <div className="rounded-md border bg-card shadow-sm overflow-hidden">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-4 border-b">
                             <div className="space-y-1">
-                                <CardTitle className="text-slate-800">Chutak Services History</CardTitle>
-                                <CardDescription>View clients who have requested one-off services.</CardDescription>
+                                <h2 className="text-lg font-semibold text-foreground">Chutak Services History</h2>
+                                <p className="text-sm text-muted-foreground">View clients who have requested one-off services.</p>
                             </div>
                             <Button
                                 onClick={() => handleAddChutak()}
-                                className="bg-red-600 hover:bg-red-700 text-white font-bold gap-2 shadow-sm"
+                                className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground gap-2"
                             >
                                 <Plus size={16} /> Add Chutak Item
                             </Button>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="rounded-md border bg-card">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Client Business</TableHead>
-                                            <TableHead>Contact</TableHead>
-                                            <TableHead className="text-right">Action</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        <DataHandler
-                                            loading={isLoading}
-                                            isEmpty={chutakClients.length === 0}
-                                            variant="table-row"
-                                            colSpan={3}
-                                            emptyText="No existing chutak clients found."
-                                        >
-                                            {chutakClients.map((client) => {
-                                                const isExpanded = expandedClientId === client.id;
-                                                return (
-                                                    <React.Fragment key={client.id}>
-                                                        <TableRow
-                                                            className={cn(
-                                                                "cursor-pointer transition-all duration-200 hover:bg-red-50/50",
-                                                                isExpanded && "bg-red-50/30 border-b-0 shadow-sm"
-                                                            )}
-                                                            onClick={() => toggleExpand(client.id)}
-                                                        >
-                                                            <TableCell>
-                                                                <div className="flex items-center gap-3">
-                                                                    <div className="p-1.5 rounded-md bg-slate-100/50 transition-colors">
-                                                                        {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                                                                    </div>
-                                                                    <div>
-                                                                        <div className="font-bold text-slate-800">{client.businessName}</div>
-                                                                        <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">{client.name}</div>
-                                                                    </div>
-                                                                </div>
-                                                            </TableCell>
-                                                            <TableCell className="text-xs font-bold text-slate-500">
-                                                                {client.phone}
-                                                            </TableCell>
-                                                            <TableCell className="text-right">
-                                                                <div className="flex justify-end pr-2">
-                                                                    <div className={cn(
-                                                                        "p-2 rounded-full transition-all",
-                                                                        isExpanded ? "text-red-600" : "text-slate-300"
-                                                                    )}>
-                                                                        <ChevronRight size={16} className={cn("transition-transform duration-300", isExpanded && "rotate-90")} />
-                                                                    </div>
-                                                                </div>
-                                                            </TableCell>
-                                                        </TableRow>
-                                                        {isExpanded && (
-                                                            <TableRow className="hover:bg-transparent border-t-0">
-                                                                <TableCell colSpan={3} className="p-0 border-t-0">
-                                                                    <ClientExpandableDetails
-                                                                        client={{ id: client.id, businessName: client.businessName }}
-                                                                        activeTab={activeTab}
-                                                                        onAssignFixed={(sub) => handleAssignFixed(client, sub)}
-                                                                        onAddChutak={() => handleAddChutak(client)}
-                                                                        onViewAllChutak={() => handleViewChutak(client)}
-                                                                        onDownloadBilling={() => handleDownloadBilling(client)}
-                                                                    />
-                                                                </TableCell>
-                                                            </TableRow>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            <Table>
+                                <TableHeader className="bg-muted/30">
+                                    <TableRow>
+                                        <TableHead className="w-24 pl-6 font-semibold text-muted-foreground whitespace-nowrap">Sr. No.</TableHead>
+                                        <TableHead className="font-semibold text-muted-foreground whitespace-nowrap">Client Business</TableHead>
+                                        <TableHead className="font-semibold text-muted-foreground whitespace-nowrap">Contact</TableHead>
+                                        <TableHead className="font-semibold text-muted-foreground whitespace-nowrap">Status</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    <DataHandler
+                                        loading={isLoading && clients.length === 0}
+                                        isEmpty={!isLoading && chutakClients.length === 0}
+                                        variant="table-row"
+                                        colSpan={4}
+                                        emptyText="No existing chutak clients found."
+                                    >
+                                        {chutakClients.map((client, index) => {
+                                            const typedClient = client as AssignClient;
+                                            const isExpanded = expandedClientId === typedClient.id;
+
+                                            return (
+                                                <React.Fragment key={client.id}>
+                                                    <TableRow
+                                                        className={cn(
+                                                            "cursor-pointer transition-colors",
+                                                            isExpanded ? "bg-muted/30" : "hover:bg-muted/20"
                                                         )}
-                                                    </React.Fragment>
-                                                );
-                                            })}
-                                        </DataHandler>
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </CardContent>
-                    </Card>
+                                                        onClick={() => toggleExpand(client.id)}
+                                                    >
+                                                        <TableCell className="py-3 pl-6 text-sm text-muted-foreground whitespace-nowrap">
+                                                            {index + 1}.
+                                                        </TableCell>
+                                                        <TableCell className="py-3 min-w-[260px]">
+                                                            {renderClientCell(typedClient, isExpanded)}
+                                                        </TableCell>
+                                                        <TableCell className="py-3 text-sm text-muted-foreground whitespace-nowrap">
+                                                            {typedClient.phone || "-"}
+                                                        </TableCell>
+                                                        <TableCell className="py-3 whitespace-nowrap">
+                                                            {renderStatusBadge(typedClient.status)}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                    {isExpanded && renderExpandedDetails(typedClient, 4)}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </DataHandler>
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </div>
                 </TabsContent>
             </Tabs>
 
-            {/* Existing Modals */}
             {assignWizardOpen && (
                 <AssignmentWizard
                     isOpen={assignWizardOpen}

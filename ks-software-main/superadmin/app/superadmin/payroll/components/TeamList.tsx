@@ -16,40 +16,68 @@ import {
     Clock,
     Calendar,
     Wallet,
-    ChevronRight,
-    LayoutGrid,
     Users,
     Filter,
     Search
 } from "lucide-react";
-import {
-    Tabs,
-    TabsList,
-    TabsTrigger,
-    TabsContent
-} from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 
-interface TeamListProps {
-    data: any[];
-    isLoading: boolean;
-    onPay: (user: any) => void;
-    onViewLogs: (user: any) => void;
-    isReadOnly?: boolean;
+export interface PayrollMember {
+    _id: string;
+    payrollRunId?: string;
+    payrollLineId?: string;
+    lineStatus?: "Pending" | "Partially Paid" | "Paid" | "Cancelled";
+    name: string;
+    email: string;
+    role?: string;
+    profilePic?: string | null;
+    company?: string;
+    timing: {
+        start: string;
+        end: string;
+    };
+    department?: string;
+    earnedBalance: number;
+    paidAmount: number;
+    attendance: {
+        present: number;
+        half: number;
+        leave?: number;
+        sundays?: number;
+        monthDays?: number;
+        paidDays?: number;
+        totalWorking: number;
+    };
+    todayStatus: string;
 }
 
-export function TeamList({ data, isLoading, onPay, onViewLogs, isReadOnly = false }: TeamListProps) {
-    const [searchQuery, setSearchQuery] = useState("");
-    const [activeCategory, setActiveCategory] = useState("all");
+interface TeamListProps {
+    data: PayrollMember[];
+    isLoading: boolean;
+    onPay: (user: PayrollMember) => void;
+    onViewLogs: (user: PayrollMember) => void;
+}
 
-    // Extract unique categories (departments)
-    const categories = useMemo(() => {
-        const cats = new Set<string>();
-        data.forEach(item => {
-            if (item.department) cats.add(item.department);
-        });
-        return ["all", ...Array.from(cats)].sort();
-    }, [data]);
+const formatShiftTime = (value?: string) => {
+    if (!value) return "";
+    const [hours, minutes] = value.split(":").map(Number);
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+        return value;
+    }
+
+    const date = new Date();
+    date.setHours(hours, minutes, 0, 0);
+    return date.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true
+    });
+};
+
+export function TeamList({ data, isLoading, onPay, onViewLogs }: TeamListProps) {
+    const [searchQuery, setSearchQuery] = useState("");
+    const [activeCategory] = useState("all");
 
     // Filter and group data
     const filteredData = useMemo(() => {
@@ -67,7 +95,7 @@ export function TeamList({ data, isLoading, onPay, onViewLogs, isReadOnly = fals
         }
 
         // Group by department
-        const groups: Record<string, any[]> = {};
+        const groups: Record<string, PayrollMember[]> = {};
         filtered.forEach(item => {
             const dept = item.department || "Other";
             if (!groups[dept]) groups[dept] = [];
@@ -84,7 +112,7 @@ export function TeamList({ data, isLoading, onPay, onViewLogs, isReadOnly = fals
                 </div>
                 <h3 className="text-lg font-bold text-foreground">No records found</h3>
                 <p className="text-muted-foreground max-w-xs mx-auto mt-2 text-sm">
-                    We couldn't find any team members matching your criteria for the selected period.
+                    We could not find any team members matching your criteria for the selected period.
                 </p>
             </div>
         );
@@ -151,12 +179,15 @@ export function TeamList({ data, isLoading, onPay, onViewLogs, isReadOnly = fals
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {members.map((member) => (
+                                    {members.map((member) => {
+                                        const isSalaryPaid = member.lineStatus === "Paid" || (member.earnedBalance > 0 && member.paidAmount >= member.earnedBalance);
+
+                                        return (
                                         <TableRow key={member._id} className="border-b hover:bg-muted/30 group transition-colors">
                                             <TableCell className="py-4 pl-6">
                                                 <div className="flex items-center gap-3">
                                                     <Avatar className="h-9 w-9 border shadow-sm">
-                                                        <AvatarImage src={member.profilePic} />
+                                                        <AvatarImage src={member.profilePic || undefined} />
                                                         <AvatarFallback className="bg-primary/10 text-primary font-bold text-xs uppercase">
                                                             {member.name.charAt(0)}
                                                         </AvatarFallback>
@@ -177,20 +208,30 @@ export function TeamList({ data, isLoading, onPay, onViewLogs, isReadOnly = fals
                                                 <div className="flex flex-col gap-1">
                                                     <div className="flex items-center gap-1.5 text-muted-foreground">
                                                         <Clock className="h-3 w-3 text-primary" />
-                                                        <span className="text-xs font-semibold">{member.timing.start} - {member.timing.end}</span>
+                                                        <span className="text-xs font-semibold">{formatShiftTime(member.timing.start)} - {formatShiftTime(member.timing.end)}</span>
                                                     </div>
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="py-4">
-                                                <div className="flex items-center justify-center gap-4">
-                                                    <div className="text-center">
-                                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider leading-none mb-1">Present</p>
-                                                        <p className="text-xs font-bold text-foreground">{member.attendance.present}</p>
+                                             <TableCell className="py-4">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <div className="text-center min-w-[34px]">
+                                                        <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider leading-none mb-1">Work</p>
+                                                        <p className="text-xs font-extrabold text-foreground">{member.attendance.totalWorking ?? 0}</p>
                                                     </div>
                                                     <div className="w-[1px] h-6 bg-border" />
-                                                    <div className="text-center">
-                                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider leading-none mb-1">Half Day</p>
-                                                        <p className="text-xs font-bold text-amber-600">{member.attendance.half}</p>
+                                                    <div className="text-center min-w-[45px]">
+                                                        <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider leading-none mb-1">Present</p>
+                                                        <p className="text-xs font-extrabold text-emerald-600">{member.attendance.present}</p>
+                                                    </div>
+                                                    <div className="w-[1px] h-6 bg-border" />
+                                                    <div className="text-center min-w-[45px]">
+                                                        <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider leading-none mb-1">Half Day</p>
+                                                        <p className="text-xs font-extrabold text-amber-600">{member.attendance.half}</p>
+                                                    </div>
+                                                    <div className="w-[1px] h-6 bg-border" />
+                                                    <div className="text-center min-w-[45px]">
+                                                        <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider leading-none mb-1">Leaves</p>
+                                                        <p className="text-xs font-extrabold text-rose-600">{member.attendance.leave ?? 0}</p>
                                                     </div>
                                                 </div>
                                             </TableCell>
@@ -217,16 +258,16 @@ export function TeamList({ data, isLoading, onPay, onViewLogs, isReadOnly = fals
                                                     </Button>
                                                     <Button
                                                         size="sm"
-                                                        onClick={() => !isReadOnly && onPay(member)}
-                                                        disabled={isReadOnly}
-                                                        className={`h-8 rounded-md font-bold text-[10px] uppercase tracking-wider px-3 ${isReadOnly ? 'bg-muted text-muted-foreground' : 'bg-primary hover:bg-primary/90'}`}
+                                                        onClick={() => !isSalaryPaid && onPay(member)}
+                                                        disabled={isSalaryPaid}
+                                                        className={`h-8 rounded-md font-bold text-[10px] uppercase tracking-wider px-3 ${isSalaryPaid ? 'bg-muted text-muted-foreground' : 'bg-primary hover:bg-primary/90'}`}
                                                     >
-                                                        {isReadOnly ? "Paid/Locked" : "Pay Now"}
+                                                        {isSalaryPaid ? "Paid/Locked" : "Pay Now"}
                                                     </Button>
                                                 </div>
                                             </TableCell>
                                         </TableRow>
-                                    ))}
+                                    )})}
                                 </TableBody>
                             </Table>
                         </div>

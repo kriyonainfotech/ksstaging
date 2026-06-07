@@ -138,6 +138,28 @@ export default function ScheduleManagementPage() {
         setIsTaskDialogOpen(true);
     };
 
+    const getScheduleDefaultAssignee = (item: any) => {
+        const assignee = item?.assignedTo || item?.defaultAssignee || item?.deliverable?.assignedTo;
+        if (assignee) {
+            return typeof assignee === "object" ? assignee._id || assignee.id || "" : assignee;
+        }
+
+        const subscriptionId = typeof item?.subscription === "object" ? item.subscription?._id : item?.subscription;
+        const serviceId = typeof item?.service === "object" ? item.service?._id : item?.service;
+        const selectedClient = clients.find((client) => client.id === selectedClientId || (client as any)._id === selectedClientId);
+        const matchingSubscription = selectedClient?.subscriptions?.find((subscription: any) => {
+            const id = subscription?._id || subscription?.id;
+            return subscriptionId && id === subscriptionId;
+        });
+        const matchingDeliverable = matchingSubscription?.deliverables?.find((deliverable: any) => {
+            const deliverableServiceId = typeof deliverable?.serviceId === "object" ? deliverable.serviceId?._id : deliverable?.serviceId;
+            return serviceId && deliverableServiceId === serviceId;
+        });
+        const fallbackAssignee = matchingDeliverable?.assignedTo;
+
+        return typeof fallbackAssignee === "object" ? fallbackAssignee?._id || fallbackAssignee?.id || "" : fallbackAssignee || "";
+    };
+
     const handleEditClick = (item: any) => {
         if (item.status === "Completed") {
             toast.info("You cannot edit a completed task");
@@ -297,6 +319,7 @@ export default function ScheduleManagementPage() {
                 teamMembers={teamMembers}
                 clients={clients}
                 admins={admins}
+                defaultAssignee={!editingTask ? getScheduleDefaultAssignee(selectedQuotaItem) : ""}
                 initialData={editingTask ? {
                     ...editingTask,
                     // Ensure the structure matches TaskDialog expectation
@@ -304,7 +327,8 @@ export default function ScheduleManagementPage() {
                 } : {
                     title: selectedQuotaItem?.content || "",
                     client: selectedClientId,
-                    type: "Team"
+                    type: "Team",
+                    assignedTo: getScheduleDefaultAssignee(selectedQuotaItem)
                 } as any}
             />
 

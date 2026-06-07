@@ -22,9 +22,10 @@ import {
 } from "@/src/redux/slices/paymentSlice";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataTable } from "@/components/ui/data-table";
-import { Plus, Filter, Building2, Lock, Download } from "lucide-react";
+import { Plus, Filter, Building2, Lock, Download, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -48,12 +49,44 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { downloadSaleInvoice, downloadPaymentReceipt, downloadMonthlySalesReport, downloadMonthlyCollectionsReport, downloadMonthlyExpensesReport } from "@/lib/pdfExport";
 import { RootState } from "@/src/redux/store";
 
+interface CompanyRef {
+    name: string;
+}
+
+interface PaymentItem {
+    _id?: string;
+    id?: string;
+    transactionType?: string;
+    isDirectCollection?: boolean;
+    payerName?: string;
+    notes?: string;
+    destinationAccount?: string;
+    expenseCategory?: string;
+    amountCollected?: number;
+    collectionDate?: string;
+    createdAt?: string;
+    saleDate?: string;
+    guestName?: string;
+    client?: {
+        businessName?: string;
+    };
+    title?: string;
+    totalAmount?: number;
+    collectedAmount?: number;
+    remainingAmount?: number;
+    status?: string;
+}
+
+type PaymentPayload = Record<string, unknown>;
+
 export default function PaymentsPage() {
     const dispatch = useAppDispatch();
     const { stats, sales, collections, isLoading, selectedCompany, selectedMonth, selectedYear } = useAppSelector((state: RootState) => state.payment);
     const { user, activeCompany } = useAppSelector((state: RootState) => state.auth);
 
     const [activeTab, setActiveTab] = useState("sales");
+    const [expenseSearch, setExpenseSearch] = useState("");
+    const [expenseCategoryFilter, setExpenseCategoryFilter] = useState("All");
 
     const monthNames = [
         "January", "February", "March", "April", "May", "June",
@@ -61,6 +94,31 @@ export default function PaymentsPage() {
     ];
 
     const isGlobalAdmin = user?.role === "Superadmin";
+
+    const filteredExpenses = useMemo(() => {
+        const search = expenseSearch.trim().toLowerCase();
+
+        return collections
+            .filter(c => c.transactionType === "Expense")
+            .filter(c => expenseCategoryFilter === "All" || c.expenseCategory === expenseCategoryFilter)
+            .filter(c => {
+                if (!search) return true;
+
+                const searchableText = [
+                    c.payerName,
+                    c.notes,
+                    c.destinationAccount,
+                    c.expenseCategory,
+                    c.amountCollected?.toString()
+                ]
+                    .filter(Boolean)
+                    .join(" ")
+                    .toLowerCase();
+
+                return searchableText.includes(search);
+            })
+            .sort((a, b) => new Date(b.collectionDate || b.createdAt).getTime() - new Date(a.collectionDate || a.createdAt).getTime());
+    }, [collections, expenseSearch, expenseCategoryFilter]);
 
     // --- REFINEMENT: Get all available companies for this user ---
     const availableCompanies = useMemo(() => {
@@ -72,7 +130,7 @@ export default function PaymentsPage() {
             list.push(typeof user.company === 'string' ? user.company : user.company.name);
         }
         if (user?.accessibleCompanies) {
-            user.accessibleCompanies.forEach((c: any) => {
+            user.accessibleCompanies.forEach((c: CompanyRef) => {
                 if (!list.includes(c.name)) list.push(c.name);
             });
         }
@@ -90,16 +148,16 @@ export default function PaymentsPage() {
     const [isExpenseOpen, setIsExpenseOpen] = useState(false);
     const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
     const [isConfirmSaveOpen, setIsConfirmSaveOpen] = useState(false);
-    const [selectedSale, setSelectedSale] = useState<any>(null);
-    const [selectedExpense, setSelectedExpense] = useState<any>(null);
-    const [selectedDirectCollection, setSelectedDirectCollection] = useState<any>(null);
-    const [saleToDelete, setSaleToDelete] = useState<any>(null);
-    const [expenseToDelete, setExpenseToDelete] = useState<any>(null);
-    const [collectionToDelete, setCollectionToDelete] = useState<any>(null);
-    const [pendingData, setPendingData] = useState<any>(null);
+    const [selectedSale, setSelectedSale] = useState<PaymentItem | null>(null);
+    const [selectedExpense, setSelectedExpense] = useState<PaymentItem | null>(null);
+    const [selectedDirectCollection, setSelectedDirectCollection] = useState<PaymentItem | null>(null);
+    const [saleToDelete, setSaleToDelete] = useState<PaymentItem | null>(null);
+    const [expenseToDelete, setExpenseToDelete] = useState<PaymentItem | null>(null);
+    const [collectionToDelete, setCollectionToDelete] = useState<PaymentItem | null>(null);
+    const [pendingData, setPendingData] = useState<PaymentPayload | null>(null);
     const [isConfirmExpenseDeleteOpen, setIsConfirmExpenseDeleteOpen] = useState(false);
     const [isConfirmCollectionDeleteOpen, setIsConfirmCollectionDeleteOpen] = useState(false);
-    const [editAccountItem, setEditAccountItem] = useState<any>(null);
+    const [editAccountItem, setEditAccountItem] = useState<PaymentItem | null>(null);
     const [editAccountValue, setEditAccountValue] = useState<string>("");
 
     // --- REFINEMENT: Sync local page state with Global Company Context ---
@@ -107,7 +165,7 @@ export default function PaymentsPage() {
         if (activeCompany && selectedCompany !== activeCompany.name) {
             dispatch(setSelectedCompany(activeCompany.name));
         }
-    }, [activeCompany, dispatch]);
+    }, [activeCompany, dispatch, selectedCompany]);
 
     useEffect(() => {
         // Fallback: If no company is selected yet, use global active company or first available
@@ -124,8 +182,8 @@ export default function PaymentsPage() {
     useEffect(() => {
         if (sales && sales.length > 0) {
             console.log(`--- [FRONTEND DEBUG] SALES DATA FOR ${selectedCompany} ---`);
-            console.table(sales.map((s: any) => ({
-                Date: new Date(s.saleDate).toLocaleDateString(),
+            console.table((sales as PaymentItem[]).map((s) => ({
+                Date: s.saleDate ? new Date(s.saleDate).toLocaleDateString() : "-",
                 ID: s._id,
                 Client: s.guestName || s.client?.businessName || "Guest",
                 Work: s.title,
@@ -143,7 +201,7 @@ export default function PaymentsPage() {
         }
     }, [stats, selectedCompany]);
 
-    const handleCollectOpen = (sale: any) => {
+    const handleCollectOpen = (sale: PaymentItem) => {
         if (isReadOnly) {
             toast.error("Read-Only View: You cannot edit this company's records.");
             return;
@@ -152,7 +210,7 @@ export default function PaymentsPage() {
         setIsCollectOpen(true);
     };
 
-    const handleCreateSale = async (data: any) => {
+    const handleCreateSale = async (data: PaymentPayload) => {
         if (selectedSale) {
             setPendingData(data);
             setIsConfirmSaveOpen(true);
@@ -164,7 +222,10 @@ export default function PaymentsPage() {
 
     const handleConfirmSave = async () => {
         if (selectedSale && pendingData) {
-            await dispatch(updateSale({ id: selectedSale._id || selectedSale.id, data: pendingData })).unwrap();
+            const saleId = selectedSale._id || selectedSale.id;
+            if (!saleId) return;
+
+            await dispatch(updateSale({ id: saleId, data: pendingData })).unwrap();
             setIsConfirmSaveOpen(false);
             setIsCreateOpen(false);
             setSelectedSale(null);
@@ -172,43 +233,48 @@ export default function PaymentsPage() {
         }
     };
 
-    const handleEditOpen = (sale: any) => {
+    const handleEditOpen = (sale: PaymentItem) => {
         setSelectedSale(sale);
         setIsCreateOpen(true);
     };
 
-    const handleDeleteClick = (sale: any) => {
+    const handleDeleteClick = (sale: PaymentItem) => {
         setSaleToDelete(sale);
         setIsConfirmDeleteOpen(true);
     };
 
     const handleConfirmDelete = async () => {
         if (saleToDelete) {
-            await dispatch(deleteSale(saleToDelete._id || saleToDelete.id)).unwrap();
+            const saleId = saleToDelete._id || saleToDelete.id;
+            if (!saleId) return;
+
+            await dispatch(deleteSale(saleId)).unwrap();
             setIsConfirmDeleteOpen(false);
             setSaleToDelete(null);
         }
     };
 
-    const handleCollectSubmit = async (data: any) => {
+    const handleCollectSubmit = async (data: PaymentPayload) => {
         await dispatch(collectPayment(data)).unwrap();
         setIsCollectOpen(false);
         setSelectedSale(null);
     };
 
-    const handleRecordExpense = async (payload: any) => {
-        if (payload.id) {
-            await dispatch(updateExpense({ id: payload.id, data: payload.data })).unwrap();
+    const handleRecordExpense = async (payload: unknown) => {
+        const editPayload = payload as { id?: string; data?: PaymentPayload };
+        if (editPayload.id && editPayload.data) {
+            await dispatch(updateExpense({ id: editPayload.id, data: editPayload.data })).unwrap();
         } else {
-            await dispatch(recordExpense(payload)).unwrap();
+            await dispatch(recordExpense(payload as PaymentPayload)).unwrap();
         }
         setIsExpenseOpen(false);
         setSelectedExpense(null);
     };
 
-    const handleCreateDirectCollection = async (payload: any) => {
-        if (payload.id) {
-            await dispatch(updateDirectCollection({ id: payload.id, data: payload.data })).unwrap();
+    const handleCreateDirectCollection = async (payload: PaymentPayload | { id: string; data: PaymentPayload }) => {
+        const editPayload = payload as { id?: string; data?: PaymentPayload };
+        if (editPayload.id && editPayload.data) {
+            await dispatch(updateDirectCollection({ id: editPayload.id, data: editPayload.data })).unwrap();
         } else {
             await dispatch(createDirectCollection(payload)).unwrap();
         }
@@ -216,17 +282,17 @@ export default function PaymentsPage() {
         setSelectedDirectCollection(null);
     };
 
-    const handleDirectCollectionEditOpen = (collection: any) => {
+    const handleDirectCollectionEditOpen = (collection: PaymentItem) => {
         setSelectedDirectCollection(collection);
         setIsDirectCollectionOpen(true);
     };
 
-    const handleExpenseEditOpen = (expense: any) => {
+    const handleExpenseEditOpen = (expense: PaymentItem) => {
         setSelectedExpense(expense);
         setIsExpenseOpen(true);
     };
 
-    const handleHistoryDeleteClick = (item: any) => {
+    const handleHistoryDeleteClick = (item: PaymentItem) => {
         if (item.transactionType === "Expense") {
             setExpenseToDelete(item);
             setIsConfirmExpenseDeleteOpen(true);
@@ -239,6 +305,8 @@ export default function PaymentsPage() {
 
     const handleConfirmExpenseDelete = async () => {
         if (expenseToDelete) {
+            if (!expenseToDelete._id) return;
+
             await dispatch(deleteExpense(expenseToDelete._id)).unwrap();
             setIsConfirmExpenseDeleteOpen(false);
             setExpenseToDelete(null);
@@ -247,6 +315,8 @@ export default function PaymentsPage() {
 
     const handleConfirmCollectionDelete = async () => {
         if (collectionToDelete) {
+            if (!collectionToDelete._id) return;
+
             await dispatch(deleteCollection(collectionToDelete._id)).unwrap();
             setIsConfirmCollectionDeleteOpen(false);
             setCollectionToDelete(null);
@@ -257,13 +327,15 @@ export default function PaymentsPage() {
         await dispatch(updateCollectionAccount({ id, destinationAccount: account })).unwrap();
     };
 
-    const handleEditAccountOpen = (item: any) => {
+    const handleEditAccountOpen = (item: PaymentItem) => {
         setEditAccountItem(item);
-        setEditAccountValue(item.destinationAccount);
+        setEditAccountValue(item.destinationAccount || "");
     };
 
     const handleConfirmAccountUpdate = async () => {
         if (editAccountItem && editAccountValue) {
+            if (!editAccountItem._id) return;
+
             await handleUpdateCollectionAccount(editAccountItem._id, editAccountValue);
             setEditAccountItem(null);
             setEditAccountValue("");
@@ -273,7 +345,7 @@ export default function PaymentsPage() {
     // Check if the current user has write access to the selected company
     const hasWriteAccess = isGlobalAdmin ||
         (user?.company && (typeof user.company === 'string' ? user.company : user.company.name) === selectedCompany) ||
-        (user?.accessibleCompanies?.some((c: any) => c.name === selectedCompany));
+        (user?.accessibleCompanies?.some((c: CompanyRef) => c.name === selectedCompany));
 
     const isReadOnly: boolean = !hasWriteAccess;
 
@@ -473,13 +545,13 @@ export default function PaymentsPage() {
                                 <Button
                                     variant="outline"
                                     onClick={() => downloadMonthlyExpensesReport(
-                                        collections.filter(c => c.transactionType === "Expense"),
+                                        filteredExpenses,
                                         selectedCompany,
                                         monthNames[selectedMonth - 1],
                                         selectedYear
                                     )}
                                     className="gap-2 border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-200"
-                                    disabled={collections.filter(c => c.transactionType === "Expense").length === 0}
+                                    disabled={filteredExpenses.length === 0}
                                 >
                                     <Download className="h-4 w-4" />
                                     Download Report
@@ -498,14 +570,34 @@ export default function PaymentsPage() {
                                 </Button>
                             </div>
                         </div>
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden p-2">
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden p-4">
+                            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                <div className="relative w-full md:max-w-sm">
+                                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                    <Input
+                                        value={expenseSearch}
+                                        onChange={(event) => setExpenseSearch(event.target.value)}
+                                        placeholder="Search expense..."
+                                        className="h-10 rounded-md border-slate-200 pl-9"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Filter className="h-4 w-4 text-slate-400" />
+                                    <Select value={expenseCategoryFilter} onValueChange={setExpenseCategoryFilter}>
+                                        <SelectTrigger className="h-10 w-full min-w-[220px] rounded-md border-slate-200 md:w-[240px]">
+                                            <SelectValue placeholder="Filter expenses" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="All">All Expenses</SelectItem>
+                                            <SelectItem value="Operational">Operational Expense</SelectItem>
+                                            <SelectItem value="Salary">Salary / Payout</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
                             <DataTable
                                 columns={historyColumns(handleExpenseEditOpen, handleHistoryDeleteClick, downloadPaymentReceipt, isReadOnly)}
-                                data={collections
-                                    .filter(c => c.transactionType === "Expense")
-                                    .sort((a, b) => new Date(b.collectionDate || b.createdAt).getTime() - new Date(a.collectionDate || a.createdAt).getTime())
-                                }
-                                filterKey="payerName"
+                                data={filteredExpenses}
                                 hidePagination={true}
                                 isLoading={isLoading}
                             />
@@ -555,7 +647,10 @@ export default function PaymentsPage() {
                 }}
                 onSubmit={handleRecordExpense}
                 isLoading={isLoading}
-                expense={selectedExpense}
+                expense={selectedExpense ? {
+                    ...selectedExpense,
+                    expenseCategory: selectedExpense.expenseCategory === "Salary" ? "Salary" : "Operational"
+                } : undefined}
             />
 
             <ConfirmDialog

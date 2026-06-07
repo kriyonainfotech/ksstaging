@@ -7,6 +7,7 @@ const activeLineItemSchema = new mongoose.Schema({
     quantity: Number,
     serviceCategory: String,
     price: Number,
+    assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     tasksCreated: { type: Number, default: 0 }
 });
 

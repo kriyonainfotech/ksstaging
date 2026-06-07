@@ -70,6 +70,21 @@ const PaymentCollectionSchema = new mongoose.Schema({
         type: Number,
         required: false
     },
+    salaryUser: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: false
+    },
+    payrollRun: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "PayrollRun",
+        required: false
+    },
+    payrollLine: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "PayrollLine",
+        required: false
+    },
     notes: {
         type: String
     }

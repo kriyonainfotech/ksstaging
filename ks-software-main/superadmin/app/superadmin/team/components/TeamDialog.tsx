@@ -11,17 +11,39 @@ import { Team } from "@/lib/teamdata";
 import { Loader2 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { SalaryProfilePayload } from "@/src/services/salaryService";
+
+export interface TeamFormSubmitData extends Record<string, unknown> {
+    salaryProfile: SalaryProfilePayload;
+}
 
 interface TeamDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onSubmit: (data: any) => void;
+    onSubmit: (data: TeamFormSubmitData) => void;
     initialData?: Team | null;
     isLoading?: boolean;
 }
 
 export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoading }: TeamDialogProps) {
-    const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm();
+    const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm();
+
+    const toTimeInputValue = (value?: string) => {
+        if (!value) return "";
+        if (/^\d{2}:\d{2}$/.test(value)) return value;
+
+        const match = value.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (!match) return value;
+
+        let hours = Number(match[1]);
+        const minutes = match[2];
+        const period = match[3].toUpperCase();
+
+        if (period === "PM" && hours !== 12) hours += 12;
+        if (period === "AM" && hours === 12) hours = 0;
+
+        return `${hours.toString().padStart(2, "0")}:${minutes}`;
+    };
 
     useEffect(() => {
         register("role");
@@ -38,7 +60,7 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
                     role: initialData.role || "Team",
                     specialization: initialData.profile?.specialization || "design",
                     skills: initialData.profile?.skills?.join(", ") || "",
-                    salary: initialData.profile?.salary?.amount || "",
+                    salary: initialData.salaryProfile?.salary?.amount || initialData.profile?.salary?.amount || "",
                     experience: initialData.profile?.experience || "",
 
                     street: initialData.profile?.address?.street || "",
@@ -52,11 +74,13 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
                     emergency2Phone: initialData.profile?.emergencyContact2?.phone || "",
 
                     notes: initialData.profile?.notes || "",
-                    timingStart: initialData.profile?.timing?.start || "9:00 AM",
-                    timingEnd: initialData.profile?.timing?.end || "7:00 PM",
-                    bankName: initialData.profile?.bankInfo?.bankName || "",
-                    accountNumber: initialData.profile?.bankInfo?.accountNumber || "",
-                    ifscCode: initialData.profile?.bankInfo?.ifscCode || ""
+                    timingStart: toTimeInputValue(initialData.profile?.timing?.start || "09:00"),
+                    timingEnd: toTimeInputValue(initialData.profile?.timing?.end || "19:00"),
+                    bankName: initialData.salaryProfile?.bankInfo?.bankName || initialData.profile?.bankInfo?.bankName || "",
+                    accountNumber: initialData.salaryProfile?.bankInfo?.accountNumber || initialData.profile?.bankInfo?.accountNumber || "",
+                    ifscCode: initialData.salaryProfile?.bankInfo?.ifscCode || initialData.profile?.bankInfo?.ifscCode || "",
+                    accountHolderName: initialData.salaryProfile?.bankInfo?.accountHolderName || "",
+                    upiId: initialData.salaryProfile?.bankInfo?.upiId || ""
                 });
             } else {
                 reset({
@@ -79,25 +103,37 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
                     emergency2Name: "",
                     emergency2Phone: "",
                     notes: "",
-                    timingStart: "9:00 AM",
-                    timingEnd: "7:00 PM",
+                    timingStart: "09:00",
+                    timingEnd: "19:00",
                     bankName: "",
                     accountNumber: "",
-                    ifscCode: ""
+                    ifscCode: "",
+                    accountHolderName: "",
+                    upiId: ""
                 });
             }
         }
-    }, [initialData, open, reset]);
+    }, [initialData, open, register, reset]);
 
 
-    const onFormSubmit = (data: any) => {
+    const onFormSubmit = (data: Record<string, string>) => {
         const formattedData = {
             ...data,
             skills: data.skills.split(",").map((s: string) => s.trim()).filter(Boolean),
-            salary: {
-                amount: Number(data.salary),
-                type: "Monthly",
-                currency: "INR"
+            salaryProfile: {
+                salary: {
+                    amount: Number(data.salary || 0),
+                    type: "Monthly" as const,
+                    currency: "INR"
+                },
+                bankInfo: {
+                    bankName: data.bankName,
+                    accountNumber: data.accountNumber,
+                    ifscCode: data.ifscCode,
+                    accountHolderName: data.accountHolderName,
+                    upiId: data.upiId
+                },
+                isActive: true
             },
             street: data.street,
             city: data.city,
@@ -113,11 +149,6 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
             timing: {
                 start: data.timingStart,
                 end: data.timingEnd
-            },
-            bankInfo: {
-                bankName: data.bankName,
-                accountNumber: data.accountNumber,
-                ifscCode: data.ifscCode
             }
         };
 
@@ -158,7 +189,7 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
                                 maxLength={10}
                                 placeholder="9876543210"
                             />
-                            {/* @ts-ignore */}
+                            {/* @ts-expect-error React Hook Form error message is not strongly typed in this untyped form */}
                             {errors.phone && <p className="text-[10px] text-red-500 font-medium">{errors.phone.message}</p>}
                         </div>
                         {!initialData && (
@@ -209,7 +240,7 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
                         </div>
 
                         <div className="space-y-2">
-                            <Label>Monthly Salary (₹)</Label>
+                            <Label>Monthly Salary (INR)</Label>
                             <Input type="number" {...register("salary")} placeholder="25000" />
                         </div>
 
@@ -242,7 +273,7 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
                                 maxLength={10}
                                 placeholder="9876543210"
                             />
-                            {/* @ts-ignore */}
+                            {/* @ts-expect-error React Hook Form error message is not strongly typed in this untyped form */}
                             {errors.emergency1Phone && <p className="text-[10px] text-red-500 font-medium">{errors.emergency1Phone.message}</p>}
                         </div>
 
@@ -264,7 +295,7 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
                                 maxLength={10}
                                 placeholder="9123456789"
                             />
-                            {/* @ts-ignore */}
+                            {/* @ts-expect-error React Hook Form error message is not strongly typed in this untyped form */}
                             {errors.emergency2Phone && <p className="text-[10px] text-red-500 font-medium">{errors.emergency2Phone.message}</p>}
                         </div>
 
@@ -289,15 +320,15 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
 
                     <Separator className="my-2" />
                     <div className="space-y-4">
-                        <h3 className="text-sm font-semibold">Timing & Bank Information</h3>
+                        <h3 className="text-sm font-semibold">Office Timing & Salary Bank Info</h3>
                         <div className="grid grid-cols-3 gap-4">
                             <div className="space-y-2">
-                                <Label>Shift Start Time</Label>
-                                <Input {...register("timingStart")} placeholder="9:00 AM" />
+                                <Label>Office Start Time</Label>
+                                <Input type="time" {...register("timingStart")} />
                             </div>
                             <div className="space-y-2">
-                                <Label>Shift End Time</Label>
-                                <Input {...register("timingEnd")} placeholder="7:00 PM" />
+                                <Label>Office End Time</Label>
+                                <Input type="time" {...register("timingEnd")} />
                             </div>
                             <div className="space-y-2">
                                 <Label>Bank Name</Label>
@@ -310,6 +341,14 @@ export function TeamDialog({ open, onOpenChange, onSubmit, initialData, isLoadin
                             <div className="space-y-2">
                                 <Label>IFSC Code</Label>
                                 <Input {...register("ifscCode")} placeholder="HDFC000..." />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Account Holder Name</Label>
+                                <Input {...register("accountHolderName")} placeholder="Kundan Pandit" />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>UPI ID</Label>
+                                <Input {...register("upiId")} placeholder="name@bank" />
                             </div>
                         </div>
                     </div>

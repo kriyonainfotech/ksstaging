@@ -19,6 +19,28 @@ export interface Team {
     customPermissions: string[];
 
     profileId: string;
+    salaryProfile?: {
+        _id?: string;
+        salary?: {
+            amount?: number;
+            type?: "Monthly" | "Hourly" | "Weekly";
+            currency?: string;
+        };
+        bankInfo?: {
+            bankName?: string;
+            accountNumber?: string;
+            ifscCode?: string;
+            accountHolderName?: string;
+            upiId?: string;
+        };
+        paymentPreferences?: {
+            preferredSourceAccount?: "Company Bank" | "Personal Bank" | "Cash";
+            notes?: string;
+        };
+        effectiveFrom?: string;
+        effectiveTo?: string;
+        isActive?: boolean;
+    };
 
     createdAt: string;
     updatedAt: string;

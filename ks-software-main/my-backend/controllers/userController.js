@@ -7,6 +7,7 @@ const admin = require("../config/firebase");
 const TeamProfile = require("../models/TeamProfile");
 const ClientProfile = require("../models/ClientProfile");
 const ClientSubscription = require("../models/ClientSubscription");
+const SalaryProfile = require("../models/SalaryProfile");
 const ROLE_PERMISSIONS = require("../config/roleDefaults");
 const cloudinary = require("../config/cloudinary");
 const CryptoJS = require("crypto-js"); // Ensure this is imported at the top
@@ -563,6 +564,9 @@ exports.getTeams = async (req, res) => {
         const profiles = await TeamProfile.find({ user: { $in: userIds } }).lean();
         const profileMap = new Map();
         profiles.forEach(p => profileMap.set(p.user.toString(), p));
+        const salaryProfiles = await SalaryProfile.find({ user: { $in: userIds }, isActive: true }).lean();
+        const salaryProfileMap = new Map();
+        salaryProfiles.forEach(p => salaryProfileMap.set(p.user.toString(), p));
 
         // Dates for filtering
         const today = new Date();
@@ -607,6 +611,7 @@ exports.getTeams = async (req, res) => {
         const formattedTeams = users.map((user) => {
             const idStr = user._id.toString();
             const profile = profileMap.get(idStr) || {};
+            const salaryProfile = salaryProfileMap.get(idStr) || null;
 
             // Daily Performance
             const userDailyTasks = dailyTaskMap.get(idStr) || [];
@@ -647,6 +652,7 @@ exports.getTeams = async (req, res) => {
                         totalDays: totalWorkingDays
                     }
                 },
+                salaryProfile,
                 profile: { ...profile, ...user },
                 profileId: profile._id,
                 _id: user._id // Explicitly enforce User ID
@@ -677,10 +683,11 @@ exports.getTeamById = async (req, res) => {
         }
 
         const profile = await TeamProfile.findOne({ user: user._id }).lean();
+        const salaryProfile = await SalaryProfile.findOne({ user: user._id, isActive: true }).lean();
 
         return res.status(200).json({
             success: true,
-            data: { ...profile, ...user.toObject(), profile: { ...profile, ...user.toObject() }, _id: user._id }
+            data: { ...profile, ...user.toObject(), salaryProfile, profile: { ...profile, ...user.toObject() }, _id: user._id }
         });
     } catch (error) {
         console.error("❌ Get Team Error:", error);
@@ -1006,7 +1013,9 @@ exports.getAllClients = async (req, res) => {
         const subs = await ClientSubscription.find({
             client: { $in: profileIds },
             status: { $in: ["Active", "Completed"] }
-        }).populate("packageTemplate", "packageName sellingPrice");
+        })
+            .populate("packageTemplate", "packageName sellingPrice")
+            .populate("deliverables.assignedTo", "name email");
 
         // Fetch distinct clients who have chutak items
         const chutakClientIdsObjects = await Schedule.distinct("client", { isChutak: true });

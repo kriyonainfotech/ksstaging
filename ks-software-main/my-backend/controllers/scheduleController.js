@@ -8,6 +8,7 @@ exports.getSchedulesByClient = async (req, res) => {
     try {
         const schedules = await Schedule.find({ client: req.params.id })
             .populate("service")
+            .populate("assignedTo", "name email")
             .populate({
                 path: "linkedTask",
                 populate: {

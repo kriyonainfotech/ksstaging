@@ -58,7 +58,10 @@ exports.getClientSubscriptions = async (req, res) => {
         const finalSubs = await ClientSubscription.find({
             client: req.params.id,
             status: { $in: ["Active", "Completed"] } // Fetch both to let frontend filter
-        }).sort({ endDate: -1 }).limit(10); // Show last 10 for history
+        })
+            .populate("deliverables.assignedTo", "name email")
+            .sort({ endDate: -1 })
+            .limit(10); // Show last 10 for history
 
         res.status(200).json({ success: true, data: finalSubs });
     } catch (error) {
@@ -248,6 +251,7 @@ exports.createSubscription = async (req, res) => {
                     client: clientId,
                     subscription: subscription._id,
                     service: item.serviceId,
+                    assignedTo: item.assignedTo || null,
                     postType: postType,
                     content: `${item.serviceName} - ${i + 1}`,
                     status: "Unscheduled"
@@ -371,6 +375,7 @@ exports.updateSubscription = async (req, res) => {
                 quantity: item.quantity || 1,
                 serviceCategory: item.serviceCategory || "",
                 price: item.price ?? item.basePrice ?? item.unitPrice ?? 0,
+                assignedTo: item.assignedTo || null,
                 tasksCreated: item.tasksCreated || 0
             }));
 
@@ -401,6 +406,7 @@ exports.updateSubscription = async (req, res) => {
                             client: subscription.client,
                             subscription: subscription._id,
                             service: newItem.serviceId,
+                            assignedTo: newItem.assignedTo || null,
                             postType: postType,
                             content: `${newItem.serviceName} - ${oldQty + i + 1}`,
                             status: "Unscheduled"
@@ -429,6 +435,16 @@ exports.updateSubscription = async (req, res) => {
                         });
                     }
                 }
+
+                const Schedule = require("../models/Schedule");
+                await Schedule.updateMany(
+                    {
+                        subscription: id,
+                        service: newItem.serviceId,
+                        status: "Unscheduled"
+                    },
+                    { assignedTo: newItem.assignedTo || null }
+                );
             }
 
             // Check for ENTIRELY REMOVED items

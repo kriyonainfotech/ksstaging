@@ -1,5 +1,7 @@
 const PaymentSale = require("../models/PaymentSale");
 const PaymentCollection = require("../models/PaymentCollection");
+const PayrollRun = require("../models/PayrollRun");
+const PayrollLine = require("../models/PayrollLine");
 const Client = require("../models/Client");
 const Company = require("../models/Company");
 
@@ -17,6 +19,98 @@ const validateCompanyAccess = async (user, targetCompanyName) => {
 
     // 4. Compare IDs
     return targetCompany._id.equals(user.company) || targetCompany.admins.includes(user._id);
+};
+
+const calculatePayrollRunTotals = (lines) => lines.reduce((acc, line) => {
+    const salary = line.salarySnapshot || {};
+    const attendance = line.attendanceSnapshot || {};
+    const amounts = line.amounts || {};
+
+    acc.employees += 1;
+    acc.baseSalary += salary.baseSalary || 0;
+    acc.earned += amounts.earned || 0;
+    acc.paid += amounts.paid || 0;
+    acc.pending += amounts.pending || 0;
+    acc.present += attendance.present || 0;
+    acc.half += attendance.half || 0;
+    acc.leave += attendance.leave || 0;
+    acc.absent += attendance.absent || 0;
+    acc.sundays = Math.max(acc.sundays, attendance.sundays || 0);
+    acc.workingDays = Math.max(acc.workingDays, attendance.totalWorking || 0);
+    acc.monthDays = Math.max(acc.monthDays, attendance.monthDays || 0);
+    return acc;
+}, {
+    employees: 0,
+    baseSalary: 0,
+    earned: 0,
+    paid: 0,
+    pending: 0,
+    present: 0,
+    half: 0,
+    leave: 0,
+    absent: 0,
+    sundays: 0,
+    workingDays: 0,
+    monthDays: 0
+});
+
+const syncPayrollRunTotals = async (payrollRunId) => {
+    if (!payrollRunId) return null;
+
+    const lines = await PayrollLine.find({ payrollRun: payrollRunId });
+    const totals = calculatePayrollRunTotals(lines);
+    const allPaid = lines.length > 0 && lines.every(line => line.status === "Paid");
+    const run = await PayrollRun.findById(payrollRunId);
+    if (!run) return null;
+
+    run.totals = totals;
+    if (allPaid) run.status = "Paid";
+    else if (run.status === "Paid") run.status = "Finalized";
+    await run.save();
+    return run;
+};
+
+const syncPayrollLinePayment = async (payrollLineId) => {
+    if (!payrollLineId) return null;
+
+    const line = await PayrollLine.findById(payrollLineId);
+    if (!line) return null;
+
+    const payments = await PaymentCollection.find({
+        transactionType: "Expense",
+        expenseCategory: "Salary",
+        payrollLine: payrollLineId
+    });
+
+    const paid = payments.reduce((sum, payment) => sum + payment.amountCollected, 0);
+    const earned = line.amounts?.earned || 0;
+    line.amounts.paid = paid;
+    line.amounts.pending = Math.max(earned - paid, 0);
+    line.status = earned > 0 && paid >= earned ? "Paid" : paid > 0 ? "Partially Paid" : "Pending";
+    line.paymentCollections = payments.map(payment => payment._id);
+    await line.save();
+    await syncPayrollRunTotals(line.payrollRun);
+    return line;
+};
+
+const resolvePayrollLineForExpense = async ({ payrollLineId, salaryUser, salaryMonth, salaryYear }) => {
+    if (payrollLineId) {
+        const line = await PayrollLine.findById(payrollLineId);
+        if (line) return line;
+    }
+
+    if (!salaryUser || !salaryMonth || !salaryYear) return null;
+
+    const run = await PayrollRun.findOne({
+        month: Number(salaryMonth),
+        year: Number(salaryYear)
+    });
+    if (!run) return null;
+
+    return PayrollLine.findOne({
+        payrollRun: run._id,
+        user: salaryUser
+    });
 };
 
 /**
@@ -322,7 +416,11 @@ exports.recordExpense = async (req, res) => {
             date,
             notes,
             company,
-            expenseCategory
+            expenseCategory,
+            salaryUser,
+            salaryMonth,
+            salaryYear,
+            payrollLineId
         } = req.body;
 
         // --- OWNERSHIP CHECK ---
@@ -343,6 +441,37 @@ exports.recordExpense = async (req, res) => {
             });
         }
 
+        // Check balance limit
+        const collections = await PaymentCollection.find({ company });
+        let balance = 0;
+        const targetAccount = destinationAccount || "Cash";
+        collections.forEach(col => {
+            const amt = col.amountCollected;
+            const matchesAccount = (
+                (targetAccount === "Personal Bank" && (col.destinationAccount === "Personal Bank" || col.destinationAccount === "Personal")) ||
+                (targetAccount === "Company Bank" && (col.destinationAccount === "Company Bank" || col.destinationAccount === "Company")) ||
+                (targetAccount === "Cash" && col.destinationAccount === "Cash")
+            );
+            if (matchesAccount) {
+                if (col.transactionType === "Income") {
+                    balance += amt;
+                } else {
+                    balance -= amt;
+                }
+            }
+        });
+
+        if (Number(amountPaid) > balance) {
+            return res.status(400).json({
+                success: false,
+                message: `Insufficient funds in ${targetAccount}. Available balance is ₹${balance.toLocaleString()}. Negative values not allowed.`
+            });
+        }
+
+        const payrollLine = expenseCategory === "Salary"
+            ? await resolvePayrollLineForExpense({ payrollLineId, salaryUser, salaryMonth, salaryYear })
+            : null;
+
         const expense = await PaymentCollection.create({
             createdBy: req.user.id,
             transactionType: "Expense",
@@ -354,8 +483,17 @@ exports.recordExpense = async (req, res) => {
             expenseCategory: expenseCategory || "Operational",
             destinationAccount: destinationAccount || "Cash",
             collectionDate: date || new Date(),
+            salaryUser: payrollLine?.user || salaryUser,
+            salaryMonth,
+            salaryYear,
+            payrollRun: payrollLine?.payrollRun,
+            payrollLine: payrollLine?._id,
             notes
         });
+
+        if (payrollLine) {
+            await syncPayrollLinePayment(payrollLine._id);
+        }
 
         console.log("[record expense][SUCCESS] Expense Recorded:", expense._id);
 
@@ -640,7 +778,11 @@ exports.updateExpense = async (req, res) => {
             date,
             notes,
             company,
-            expenseCategory
+            expenseCategory,
+            salaryUser,
+            salaryMonth,
+            salaryYear,
+            payrollLineId
         } = req.body;
 
         const expense = await PaymentCollection.findById(id);
@@ -663,6 +805,17 @@ exports.updateExpense = async (req, res) => {
             return res.status(403).json({ success: false, message: "Access Denied: Not authorized to update this expense" });
         }
 
+        const previousPayrollLine = expense.payrollLine;
+        const nextExpenseCategory = expenseCategory || expense.expenseCategory;
+        const nextPayrollLine = nextExpenseCategory === "Salary"
+            ? await resolvePayrollLineForExpense({
+                payrollLineId,
+                salaryUser: salaryUser || expense.salaryUser,
+                salaryMonth: salaryMonth || expense.salaryMonth,
+                salaryYear: salaryYear || expense.salaryYear
+            })
+            : null;
+
         // Update fields
         expense.payerName = partyName || expense.payerName;
         expense.amountCollected = Number(amountPaid) || expense.amountCollected;
@@ -671,9 +824,21 @@ exports.updateExpense = async (req, res) => {
         expense.collectionDate = date || expense.collectionDate;
         expense.notes = notes;
         expense.company = company || expense.company;
-        expense.expenseCategory = expenseCategory || expense.expenseCategory;
+        expense.expenseCategory = nextExpenseCategory;
+        expense.salaryUser = nextPayrollLine?.user || (nextExpenseCategory === "Salary" ? salaryUser || expense.salaryUser : undefined);
+        expense.salaryMonth = nextExpenseCategory === "Salary" ? salaryMonth || expense.salaryMonth : undefined;
+        expense.salaryYear = nextExpenseCategory === "Salary" ? salaryYear || expense.salaryYear : undefined;
+        expense.payrollRun = nextPayrollLine?.payrollRun;
+        expense.payrollLine = nextPayrollLine?._id;
 
         await expense.save();
+
+        if (previousPayrollLine) {
+            await syncPayrollLinePayment(previousPayrollLine);
+        }
+        if (nextPayrollLine && (!previousPayrollLine || previousPayrollLine.toString() !== nextPayrollLine._id.toString())) {
+            await syncPayrollLinePayment(nextPayrollLine._id);
+        }
 
         console.log("[update expense][SUCCESS] Expense Updated:", expense._id);
         res.status(200).json({ success: true, data: expense });
@@ -711,7 +876,11 @@ exports.deleteExpense = async (req, res) => {
             return res.status(403).json({ success: false, message: "Access Denied: Not authorized to delete this expense" });
         }
 
+        const linkedPayrollLine = expense.payrollLine;
         await PaymentCollection.findByIdAndDelete(id);
+        if (linkedPayrollLine) {
+            await syncPayrollLinePayment(linkedPayrollLine);
+        }
 
         console.log("[delete expense][SUCCESS] Expense Deleted:", id);
         res.status(200).json({ success: true, message: "Expense deleted successfully" });

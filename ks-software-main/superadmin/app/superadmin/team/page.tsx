@@ -2,22 +2,23 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import {
-    useReactTable, getCoreRowModel, getPaginationRowModel, getFilteredRowModel, flexRender
+    useReactTable, getCoreRowModel, getPaginationRowModel, flexRender
 } from "@tanstack/react-table";
 import { useAppDispatch, useAppSelector } from "@/src/redux/hooks";
 import { fetchTeam, createTeamMember, updateTeamMember, deleteTeamMember, resetTeamPassword } from "@/src/redux/slices/teamSlice";
 import { getTeamColumns } from "./components/columns";
-import { TeamDialog } from "./components/TeamDialog";
+import { TeamDialog, TeamFormSubmitData } from "./components/TeamDialog";
 import { TeamSheet } from "./components/TeamSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Users, Loader2, Search } from "lucide-react";
+import { Plus, Users, Search } from "lucide-react";
 import { Team } from "@/lib/teamdata";
 import { ResetPasswordDialog } from "@/components/ResetPasswordDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { toast } from "sonner";
 import { DataHandler } from "@/components/DataHandler";
+import { salaryService } from "@/src/services/salaryService";
 
 export default function TeamPage() {
     const dispatch = useAppDispatch();
@@ -77,7 +78,7 @@ export default function TeamPage() {
         setPasswordDialogOpen(true);
     };
 
-    const handlePasswordSubmit = async (id: string, data: any) => {
+    const handlePasswordSubmit = async (id: string, data: { password: string }) => {
         console.log(id, data);
         setPasswordDialogOpen(false);
         await dispatch(resetTeamPassword({ id, password: data.password }));
@@ -96,20 +97,24 @@ export default function TeamPage() {
             toast.success("Team member removed successfully");
             setDeleteDialogOpen(false);
             setDeleteId(null);
-        } catch (error) {
+        } catch {
             toast.error("Failed to remove team member");
         }
     };
 
-    const handleSubmit = async (data: any) => {
+    const handleSubmit = async (data: TeamFormSubmitData) => {
         // Backend expects specific structure, transform if needed here
         // The Dialog already returns clean data: { name, specialization, salary... }
+        const { salaryProfile, ...teamData } = data;
 
         if (currentMember) {
-            await dispatch(updateTeamMember({ id: currentMember._id, userId: currentMember._id, data }));
+            const result = await dispatch(updateTeamMember({ id: currentMember._id, userId: currentMember._id, data: teamData })).unwrap();
+            await salaryService.upsertSalaryProfile(result.data._id, salaryProfile);
         } else {
-            await dispatch(createTeamMember(data));
+            const result = await dispatch(createTeamMember(teamData)).unwrap();
+            await salaryService.upsertSalaryProfile(result.data._id, salaryProfile);
         }
+        dispatch(fetchTeam());
         setDialogOpen(false);
     };
 
